@@ -1,0 +1,86 @@
+import asyncio
+import websockets
+import json
+import time
+### create a function that converts solana to dollars
+
+coins = [[], []]
+coins_populated_event = asyncio.Event()
+
+def record_trade_time(mint):
+    #Update trade time for a given mint.
+    if mint in coins[0]:
+        index = coins[0].index(mint)
+        coins[1][index] = time.time()  # Update the trade time with the current timestamp
+    else:
+        # Token not in list, skipping or other logic can be handled here
+        pass
+
+def extract_mint(message):
+    current_time = time.time()
+    if 'marketCapSol' in message and message['marketCapSol'] < 45:
+        if len(coins[0]) <= 20:
+            coins[0].append(message['mint'])
+            coins[1].append(current_time)  # Add current timestamp
+            coins_populated_event.set()
+            print(message['mint'])
+        elif all(current_time - trade_time >= 180 for trade_time in coins[1]):
+            oldest_trade_index = coins[1].index(min(coins[1]))  # Find index of oldest trade time
+            coins[0].pop(oldest_trade_index)  # Remove the corresponding mint
+            coins[1].pop(oldest_trade_index)  # Remove the trade time
+        else:
+            pass #print("coins full")
+    else:
+        print("market cap too high")
+
+
+
+async def subscribe():
+    uri = "wss://pumpportal.fun/api/data"
+    async with websockets.connect(uri) as websocket:
+
+      # Subscribing to token creation events
+        payload = {
+            "method": "subscribeNewToken",
+        }
+        await websocket.send(json.dumps(payload))
+
+        async for message in websocket:
+            extract_mint(json.loads(message))
+
+async def token():
+    uri = "wss://pumpportal.fun/api/data"
+    async with websockets.connect(uri) as websocket:
+
+        await coins_populated_event.wait()
+        # Subscribing to trades on tokens
+        payload = {
+            "method": "subscribeTokenTrade",
+            "keys": coins[0]  # array of token CAs to watch
+        }
+        await websocket.send(json.dumps(payload))
+
+        async for message in websocket:
+            message_json = json.loads(message)
+            if 'marketCapSol' in message_json and 'mint' in message_json:
+                ## add the time stamp to coin[0] for coin[1]
+                record_trade_time(message_json['mint'])
+                print(f"trade: {message_json['mint']} mc: {message_json['marketCapSol']}")
+                if 35 <= message_json['marketCapSol'] <= 60:
+                  print(message_json['mint'])
+                  print("!!! BUY!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!") ## buy signal
+
+
+
+async def main():
+    subscribe_task = asyncio.create_task(subscribe())
+    token_task = asyncio.create_task(token())
+    await asyncio.gather(subscribe_task, token_task)
+        
+            
+            
+
+##asyncio.gather(subscribe(), token())
+
+# Start the main coroutine which runs both subscribe and token functions concurrently
+asyncio.run(main())
